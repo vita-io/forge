@@ -61,15 +61,13 @@
  *
  * The OID for the RSA key algorithm is: 1.2.840.113549.1.1.1
  */
-(function() {
-function initModule(forge) {
-/* ########## Begin module implementation ########## */
+var forge = require("./forge");
 
 if(typeof BigInteger === 'undefined') {
   var BigInteger = forge.jsbn.BigInteger;
 }
 
-// shortcut for asn.1 API
+// asn.1 API
 var asn1 = forge.asn1;
 
 /*
@@ -1777,6 +1775,4 @@ function _base64ToBigInt(b64) {
   return new BigInteger(forge.util.bytesToHex(forge.util.decode64(b64)), 16);
 }
 
-} // end module implementation
-
-})();
+module.exports = pki.rsa;

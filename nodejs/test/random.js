@@ -1,7 +1,6 @@
 (function() {
 
-function Tests(ASSERT, RANDOM, UTIL) {
-
+function Tests(ASSERT, random, UTIL) {
   describe('random', function() {
     it('should generate 10 random bytes', function() {
       var random = RANDOM.createInstance();
@@ -49,8 +48,8 @@ function Tests(ASSERT, RANDOM, UTIL) {
 // check for AMD
 if(typeof define === 'function') {
   define([
-    'forge/random',
-    'forge/util'
+    '../../js/random',
+    '../../js/util'
   ], function(RANDOM, UTIL) {
     Tests(
       // Global provided by test harness
@@ -63,8 +62,8 @@ if(typeof define === 'function') {
   // assume NodeJS
   Tests(
     require('assert'),
-    require('../../js/random')(),
-    require('../../js/util')());
+    require('../../js/random'),
+    require('../../js/util'));
 }
 
 })();
