@@ -61,23 +61,21 @@
  *
  * The OID for the RSA key algorithm is: 1.2.840.113549.1.1.1
  */
-var oids = require("./oids");
-var util = require("./util");
-var random = require("./random");
-var prime = require("./prime");
-var pkcs1 = require("./pkcs1");
+var forge = require("./forge");
 
-var BigInteger = require("./jsbn").BigInteger;
+if(typeof BigInteger === 'undefined') {
+  var BigInteger = forge.jsbn.BigInteger;
+}
 
 // asn.1 API
-var asn1 = require("./asn1");
+var asn1 = forge.asn1;
 
 /*
  * RSA encryption and decryption, see RFC 2313.
  */
-var rsa = {};
-
-module.exports = rsa;
+forge.pki = forge.pki || {};
+forge.pki.rsa = forge.rsa = forge.rsa || {};
+var pki = forge.pki;
 
 // for finding primes, which are 30k+i for i = 1, 7, 11, 13, 17, 19, 23, 29
 var GCD_30_DELTA = [6, 4, 2, 4, 2, 4, 6, 2];
@@ -218,7 +216,7 @@ var rsaPublicKeyValidator = {
 
 // validator for an SubjectPublicKeyInfo structure
 // Note: Currently only works with an RSA public key
-var publicKeyValidator = rsa.publicKeyValidator = {
+var publicKeyValidator = forge.pki.rsa.publicKeyValidator = {
   name: 'SubjectPublicKeyInfo',
   tagClass: asn1.Class.UNIVERSAL,
   type: asn1.Type.SEQUENCE,
@@ -274,8 +272,8 @@ var publicKeyValidator = rsa.publicKeyValidator = {
 var emsaPkcs1v15encode = function(md) {
   // get the oid for the algorithm
   var oid;
-  if(md.algorithm in oids) {
-    oid = oids[md.algorithm];
+  if(md.algorithm in pki.oids) {
+    oid = pki.oids[md.algorithm];
   } else {
     var error = new Error('Unknown message digest algorithm.');
     error.algorithm = md.algorithm;
@@ -418,7 +416,7 @@ var _modPow = function(x, key, pub) {
   var r;
   do {
     r = new BigInteger(
-      util.bytesToHex(random.getBytes(key.n.bitLength() / 8)),
+      forge.util.bytesToHex(forge.random.getBytes(key.n.bitLength() / 8)),
       16);
   } while(r.compareTo(key.n) >= 0 || !r.gcd(key.n).equals(BigInteger.ONE));
   x = x.multiply(r.modPow(key.e, key.n)).mod(key.n);
@@ -467,7 +465,7 @@ var _modPow = function(x, key, pub) {
  *
  * @return the encrypted bytes as a string.
  */
-rsa.encrypt = function(m, key, bt) {
+pki.rsa.encrypt = function(m, key, bt) {
   var pub = bt;
   var eb;
 
@@ -479,7 +477,7 @@ rsa.encrypt = function(m, key, bt) {
     pub = (bt === 0x02);
     eb = _encodePkcs1_v1_5(m, key, bt);
   } else {
-    eb = util.createBuffer();
+    eb = forge.util.createBuffer();
     eb.putBytes(m);
   }
 
@@ -494,13 +492,13 @@ rsa.encrypt = function(m, key, bt) {
   // bytes than k, then prepend zero bytes to fill up ed
   // FIXME: hex conversion inefficient, get BigInteger w/byte strings
   var yhex = y.toString(16);
-  var ed = util.createBuffer();
+  var ed = forge.util.createBuffer();
   var zeros = k - Math.ceil(yhex.length / 2);
   while(zeros > 0) {
     ed.putByte(0x00);
     --zeros;
   }
-  ed.putBytes(util.hexToBytes(yhex));
+  ed.putBytes(forge.util.hexToBytes(yhex));
   return ed.getBytes();
 };
 
@@ -522,7 +520,7 @@ rsa.encrypt = function(m, key, bt) {
  *
  * @return the decrypted message as a byte string.
  */
-rsa.decrypt = function(ed, key, pub, ml) {
+pki.rsa.decrypt = function(ed, key, pub, ml) {
   // get the length of the modulus in bytes
   var k = Math.ceil(key.n.bitLength() / 8);
 
@@ -536,7 +534,7 @@ rsa.decrypt = function(ed, key, pub, ml) {
 
   // convert encrypted data into a big integer
   // FIXME: hex conversion inefficient, get BigInteger w/byte strings
-  var y = new BigInteger(util.createBuffer(ed).toHex(), 16);
+  var y = new BigInteger(forge.util.createBuffer(ed).toHex(), 16);
 
   // y must be less than the modulus or it wasn't the result of
   // a previous mod operation (encryption) using that modulus
@@ -551,13 +549,13 @@ rsa.decrypt = function(ed, key, pub, ml) {
   // prepend zero bytes to fill up eb
   // FIXME: hex conversion inefficient, get BigInteger w/byte strings
   var xhex = x.toString(16);
-  var eb = util.createBuffer();
+  var eb = forge.util.createBuffer();
   var zeros = k - Math.ceil(xhex.length / 2);
   while(zeros > 0) {
     eb.putByte(0x00);
     --zeros;
   }
-  eb.putBytes(util.hexToBytes(xhex));
+  eb.putBytes(forge.util.hexToBytes(xhex));
 
   if(ml !== false) {
     // legacy, default to PKCS#1 v1.5 padding
@@ -582,7 +580,7 @@ rsa.decrypt = function(ed, key, pub, ml) {
  *
  * @return the state object to use to generate the key-pair.
  */
-rsa.createKeyPairGenerationState = function(bits, e, options) {
+pki.rsa.createKeyPairGenerationState = function(bits, e, options) {
   // TODO: migrate step-based prime generation code to forge.prime
 
   // set default bits
@@ -593,7 +591,7 @@ rsa.createKeyPairGenerationState = function(bits, e, options) {
 
   // create prng with api that matches BigInteger secure random
   options = options || {};
-  var prng = options.prng || random;
+  var prng = options.prng || forge.random;
   var rng = {
     // x is an array to fill with bytes
     nextBytes: function(x) {
@@ -661,7 +659,7 @@ rsa.createKeyPairGenerationState = function(bits, e, options) {
  *
  * @return true if the key-generation completed, false if not.
  */
-rsa.stepKeyPairGenerationState = function(state, n) {
+pki.rsa.stepKeyPairGenerationState = function(state, n) {
   // set default algorithm if not set
   if(!('algorithm' in state)) {
     state.algorithm = 'PRIMEINC';
@@ -784,11 +782,11 @@ rsa.stepKeyPairGenerationState = function(state, n) {
       // set keys
       var d = state.e.modInverse(state.phi);
       state.keys = {
-        privateKey: rsa.setPrivateKey(
+        privateKey: pki.rsa.setPrivateKey(
           state.n, state.e, d, state.p, state.q,
           d.mod(state.p1), d.mod(state.q1),
           state.q.modInverse(state.p)),
-        publicKey: rsa.setPublicKey(state.n, state.e)
+        publicKey: pki.rsa.setPublicKey(state.n, state.e)
       };
     }
 
@@ -832,7 +830,7 @@ rsa.stepKeyPairGenerationState = function(state, n) {
  *
  * @return an object with privateKey and publicKey properties.
  */
-rsa.generateKeyPair = function(bits, e, options, callback) {
+pki.rsa.generateKeyPair = function(bits, e, options, callback) {
   // (bits), (options), (callback)
   if(arguments.length === 1) {
     if(typeof bits === 'object') {
@@ -878,9 +876,9 @@ rsa.generateKeyPair = function(bits, e, options, callback) {
   if(e === undefined) {
     e = options.e || 0x10001;
   }
-  var state = rsa.createKeyPairGenerationState(bits, e, options);
+  var state = pki.rsa.createKeyPairGenerationState(bits, e, options);
   if(!callback) {
-    rsa.stepKeyPairGenerationState(state, 0);
+    pki.rsa.stepKeyPairGenerationState(state, 0);
     return state.keys;
   }
   _generateKeyPair(state, options, callback);
@@ -894,7 +892,7 @@ rsa.generateKeyPair = function(bits, e, options, callback) {
  *
  * @return the public key.
  */
-rsa.setRsaPublicKey = rsa.setPublicKey = function(n, e) {
+pki.setRsaPublicKey = pki.rsa.setPublicKey = function(n, e) {
   var key = {
     n: n,
     e: e
@@ -933,7 +931,7 @@ rsa.setRsaPublicKey = rsa.setPublicKey = function(n, e) {
     } else if(scheme === 'RSA-OAEP' || scheme === 'RSAES-OAEP') {
       scheme = {
         encode: function(m, key) {
-          return pkcs1.encode_rsa_oaep(key, m, schemeOptions);
+          return forge.pkcs1.encode_rsa_oaep(key, m, schemeOptions);
         }
       };
     } else if(['RAW', 'NONE', 'NULL', null].indexOf(scheme) !== -1) {
@@ -944,7 +942,7 @@ rsa.setRsaPublicKey = rsa.setPublicKey = function(n, e) {
 
     // do scheme-based encoding then rsa encryption
     var e = scheme.encode(data, key, true);
-    return rsa.encrypt(e, key, true);
+    return pki.rsa.encrypt(e, key, true);
   };
 
   /**
@@ -1007,7 +1005,7 @@ rsa.setRsaPublicKey = rsa.setPublicKey = function(n, e) {
      }
 
      // do rsa decryption w/o any decoding, then verify -- which does decoding
-     var d = rsa.decrypt(signature, key, true, false);
+     var d = pki.rsa.decrypt(signature, key, true, false);
      return scheme.verify(digest, d, key.n.bitLength());
   };
 
@@ -1029,7 +1027,7 @@ rsa.setRsaPublicKey = rsa.setPublicKey = function(n, e) {
  *
  * @return the private key.
  */
-rsa.setRsaPrivateKey = rsa.setPrivateKey = function(
+pki.setRsaPrivateKey = pki.rsa.setPrivateKey = function(
   n, e, d, p, q, dP, dQ, qInv) {
   var key = {
     n: n,
@@ -1063,14 +1061,14 @@ rsa.setRsaPrivateKey = rsa.setPrivateKey = function(
     }
 
     // do rsa decryption w/o any decoding
-    var d = rsa.decrypt(data, key, false, false);
+    var d = pki.rsa.decrypt(data, key, false, false);
 
     if(scheme === 'RSAES-PKCS1-V1_5') {
       scheme = { decode: _decodePkcs1_v1_5 };
     } else if(scheme === 'RSA-OAEP' || scheme === 'RSAES-OAEP') {
       scheme = {
         decode: function(d, key) {
-          return pkcs1.decode_rsa_oaep(key, d, schemeOptions);
+          return forge.pkcs1.decode_rsa_oaep(key, d, schemeOptions);
         }
       };
     } else if(['RAW', 'NONE', 'NULL', null].indexOf(scheme) !== -1) {
@@ -1125,7 +1123,7 @@ rsa.setRsaPrivateKey = rsa.setPrivateKey = function(
 
     // encode and then encrypt
     var d = scheme.encode(md, key.n.bitLength());
-    return rsa.encrypt(d, key, bt);
+    return pki.rsa.encrypt(d, key, bt);
   };
 
   return key;
@@ -1138,7 +1136,7 @@ rsa.setRsaPrivateKey = rsa.setPrivateKey = function(
  *
  * @return the ASN.1 PrivateKeyInfo.
  */
-rsa.wrapRsaPrivateKey = function(rsaKey) {
+pki.wrapRsaPrivateKey = function(rsaKey) {
   // PrivateKeyInfo
   return asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
     // version (0)
@@ -1148,7 +1146,7 @@ rsa.wrapRsaPrivateKey = function(rsaKey) {
     asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
       asn1.create(
         asn1.Class.UNIVERSAL, asn1.Type.OID, false,
-        asn1.oidToDer(oids.rsaEncryption).getBytes()),
+        asn1.oidToDer(pki.oids.rsaEncryption).getBytes()),
       asn1.create(asn1.Class.UNIVERSAL, asn1.Type.NULL, false, '')
     ]),
     // PrivateKey
@@ -1165,12 +1163,12 @@ rsa.wrapRsaPrivateKey = function(rsaKey) {
  *
  * @return the private key.
  */
-rsa.privateKeyFromAsn1 = function(obj) {
+pki.privateKeyFromAsn1 = function(obj) {
   // get PrivateKeyInfo
   var capture = {};
   var errors = [];
   if(asn1.validate(obj, privateKeyValidator, capture, errors)) {
-    obj = asn1.fromDer(util.createBuffer(capture.privateKey));
+    obj = asn1.fromDer(forge.util.createBuffer(capture.privateKey));
   }
 
   // get RSAPrivateKey
@@ -1187,17 +1185,17 @@ rsa.privateKeyFromAsn1 = function(obj) {
   // capture.privateKeyVersion
   // FIXME: inefficient, get a BigInteger that uses byte strings
   var n, e, d, p, q, dP, dQ, qInv;
-  n = util.createBuffer(capture.privateKeyModulus).toHex();
-  e = util.createBuffer(capture.privateKeyPublicExponent).toHex();
-  d = util.createBuffer(capture.privateKeyPrivateExponent).toHex();
-  p = util.createBuffer(capture.privateKeyPrime1).toHex();
-  q = util.createBuffer(capture.privateKeyPrime2).toHex();
-  dP = util.createBuffer(capture.privateKeyExponent1).toHex();
-  dQ = util.createBuffer(capture.privateKeyExponent2).toHex();
-  qInv = util.createBuffer(capture.privateKeyCoefficient).toHex();
+  n = forge.util.createBuffer(capture.privateKeyModulus).toHex();
+  e = forge.util.createBuffer(capture.privateKeyPublicExponent).toHex();
+  d = forge.util.createBuffer(capture.privateKeyPrivateExponent).toHex();
+  p = forge.util.createBuffer(capture.privateKeyPrime1).toHex();
+  q = forge.util.createBuffer(capture.privateKeyPrime2).toHex();
+  dP = forge.util.createBuffer(capture.privateKeyExponent1).toHex();
+  dQ = forge.util.createBuffer(capture.privateKeyExponent2).toHex();
+  qInv = forge.util.createBuffer(capture.privateKeyCoefficient).toHex();
 
   // set private key
-  return rsa.setRsaPrivateKey(
+  return pki.setRsaPrivateKey(
     new BigInteger(n, 16),
     new BigInteger(e, 16),
     new BigInteger(d, 16),
@@ -1215,7 +1213,7 @@ rsa.privateKeyFromAsn1 = function(obj) {
  *
  * @return the ASN.1 representation of an RSAPrivateKey.
  */
-rsa.privateKeyToAsn1 = rsa.privateKeyToRSAPrivateKey = function(key) {
+pki.privateKeyToAsn1 = pki.privateKeyToRSAPrivateKey = function(key) {
   // RSAPrivateKey
   return asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
     // version (0 = only 2 primes, 1 multiple primes)
@@ -1255,14 +1253,14 @@ rsa.privateKeyToAsn1 = rsa.privateKeyToRSAPrivateKey = function(key) {
  *
  * @return the public key.
  */
-rsa.publicKeyFromAsn1 = function(obj) {
+pki.publicKeyFromAsn1 = function(obj) {
   // get SubjectPublicKeyInfo
   var capture = {};
   var errors = [];
   if(asn1.validate(obj, publicKeyValidator, capture, errors)) {
     // get oid
     var oid = asn1.derToOid(capture.publicKeyOid);
-    if(oid !== oids.rsaEncryption) {
+    if(oid !== pki.oids.rsaEncryption) {
       var error = new Error('Cannot read public key. Unknown OID.');
       error.oid = oid;
       throw error;
@@ -1280,11 +1278,11 @@ rsa.publicKeyFromAsn1 = function(obj) {
   }
 
   // FIXME: inefficient, get a BigInteger that uses byte strings
-  var n = util.createBuffer(capture.publicKeyModulus).toHex();
-  var e = util.createBuffer(capture.publicKeyExponent).toHex();
+  var n = forge.util.createBuffer(capture.publicKeyModulus).toHex();
+  var e = forge.util.createBuffer(capture.publicKeyExponent).toHex();
 
   // set public key
-  return rsa.setRsaPublicKey(
+  return pki.setRsaPublicKey(
     new BigInteger(n, 16),
     new BigInteger(e, 16));
 };
@@ -1296,20 +1294,20 @@ rsa.publicKeyFromAsn1 = function(obj) {
  *
  * @return the asn1 representation of a SubjectPublicKeyInfo.
  */
-rsa.publicKeyToAsn1 = rsa.publicKeyToSubjectPublicKeyInfo = function(key) {
+pki.publicKeyToAsn1 = pki.publicKeyToSubjectPublicKeyInfo = function(key) {
   // SubjectPublicKeyInfo
   return asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
     // AlgorithmIdentifier
     asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
       // algorithm
       asn1.create(asn1.Class.UNIVERSAL, asn1.Type.OID, false,
-        asn1.oidToDer(oids.rsaEncryption).getBytes()),
+        asn1.oidToDer(pki.oids.rsaEncryption).getBytes()),
       // parameters (null)
       asn1.create(asn1.Class.UNIVERSAL, asn1.Type.NULL, false, '')
     ]),
     // subjectPublicKey
     asn1.create(asn1.Class.UNIVERSAL, asn1.Type.BITSTRING, false, [
-      rsa.publicKeyToRSAPublicKey(key)
+      pki.publicKeyToRSAPublicKey(key)
     ])
   ]);
 };
@@ -1321,7 +1319,7 @@ rsa.publicKeyToAsn1 = rsa.publicKeyToSubjectPublicKeyInfo = function(key) {
  *
  * @return the asn1 representation of a RSAPublicKey.
  */
-rsa.publicKeyToRSAPublicKey = function(key) {
+pki.publicKeyToRSAPublicKey = function(key) {
   // RSAPublicKey
   return asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
     // modulus (n)
@@ -1344,7 +1342,7 @@ rsa.publicKeyToRSAPublicKey = function(key) {
  * @return the padded byte buffer.
  */
 function _encodePkcs1_v1_5(m, key, bt) {
-  var eb = util.createBuffer();
+  var eb = forge.util.createBuffer();
 
   // get the length of the modulus in bytes
   var k = Math.ceil(key.n.bitLength() / 8);
@@ -1391,7 +1389,7 @@ function _encodePkcs1_v1_5(m, key, bt) {
     // pad with random non-zero values
     while(padNum > 0) {
       var numZeros = 0;
-      var padBytes = random.getBytes(padNum);
+      var padBytes = forge.random.getBytes(padNum);
       for(var i = 0; i < padNum; ++i) {
         padByte = padBytes.charCodeAt(i);
         if(padByte === 0) {
@@ -1436,7 +1434,7 @@ function _decodePkcs1_v1_5(em, key, pub, ml) {
    */
 
   // parse the encryption block
-  var eb = util.createBuffer(em);
+  var eb = forge.util.createBuffer(em);
   var first = eb.getByte();
   var bt = eb.getByte();
   if(first !== 0x00 ||
@@ -1538,7 +1536,7 @@ function _generateKeyPair(state, options, callback) {
   }
 
   function getPrime(bits, callback) {
-    prime.generateProbablePrime(bits, opts, callback);
+    forge.prime.generateProbablePrime(bits, opts, callback);
   }
 
   function finish(err, num) {
@@ -1597,11 +1595,11 @@ function _generateKeyPair(state, options, callback) {
     // set keys
     var d = state.e.modInverse(state.phi);
     state.keys = {
-      privateKey: rsa.setPrivateKey(
+      privateKey: pki.rsa.setPrivateKey(
         state.n, state.e, d, state.p, state.q,
         d.mod(state.p1), d.mod(state.q1),
         state.q.modInverse(state.p)),
-      publicKey: rsa.setPublicKey(state.n, state.e)
+      publicKey: pki.rsa.setPublicKey(state.n, state.e)
     };
 
     callback(null, state.keys);
@@ -1621,7 +1619,7 @@ function _bnToBytes(b) {
   if(hex[0] >= '8') {
     hex = '00' + hex;
   }
-  return util.hexToBytes(hex);
+  return forge.util.hexToBytes(hex);
 }
 
 /**
@@ -1648,3 +1646,5 @@ function _getMillerRabinTests(bits) {
   if(bits <= 1250) return 3;
   return 2;
 }
+
+module.exports = pki.rsa;

@@ -17,7 +17,6 @@
  */
 var modes = require("./cipherModes");
 var cipher = require("./cipher");
-var util = require("./util");
 
 /* AES API */
 var aes = {};
@@ -184,19 +183,19 @@ aes.Algorithm.prototype.initialize = function(options) {
   if(typeof key === 'string' &&
     (key.length === 16 || key.length === 24 || key.length === 32)) {
     // convert key string into byte buffer
-    key = util.createBuffer(key);
-  } else if(util.isArray(key) &&
+    key = forge.util.createBuffer(key);
+  } else if(forge.util.isArray(key) &&
     (key.length === 16 || key.length === 24 || key.length === 32)) {
     // convert key integer array into byte buffer
     tmp = key;
-    key = util.createBuffer();
+    key = forge.util.createBuffer();
     for(var i = 0; i < tmp.length; ++i) {
       key.putByte(tmp[i]);
     }
   }
 
   // convert key byte buffer into 32-bit integer array
-  if(!util.isArray(key)) {
+  if(!forge.util.isArray(key)) {
     tmp = key;
     key = [];
 
@@ -211,7 +210,7 @@ aes.Algorithm.prototype.initialize = function(options) {
   }
 
   // key must be an array of 32-bit integers by now
-  if(!util.isArray(key) ||
+  if(!forge.util.isArray(key) ||
     !(key.length === 4 || key.length === 6 || key.length === 8)) {
     throw new Error('Invalid key parameter.');
   }
@@ -1080,7 +1079,7 @@ function _createCipher(options) {
   cipher.start = function(iv, options) {
     // backwards compatibility: support second arg as output buffer
     var output = null;
-    if(options instanceof util.ByteBuffer) {
+    if(options instanceof forge.util.ByteBuffer) {
       output = options;
       options = {};
     }

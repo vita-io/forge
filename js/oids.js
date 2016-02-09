@@ -5,7 +5,10 @@
  *
  * Copyright (c) 2010-2013 Digital Bazaar, Inc.
  */
-var oids = {};
+var forge = require("./forge");
+
+forge.pki = forge.pki || {};
+var oids = forge.pki.oids = forge.oids = forge.oids || {};
 
 module.exports = oids;
 
