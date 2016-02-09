@@ -1,3 +1,21 @@
+This branch is only slightly different from b2da661d, yet this one works with PhantomJS and the other one does not.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Forge
 
 [![npm package](https://nodei.co/npm/node-forge.png?downloads=true&downloadRank=true&stars=true)](https://nodei.co/npm/node-forge/)
