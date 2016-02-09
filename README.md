@@ -1,5 +1,7 @@
 This branch is only slightly different from b2da661d, yet this one works with PhantomJS and the other one does not.
 
+See [comparison in Github](https://github.com/digitalbazaar/forge/compare/b2da661d...ysangkok:phantom_still_works?expand=1)
+
 
 
 
