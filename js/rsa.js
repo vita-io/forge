@@ -1779,4 +1779,4 @@ function _base64ToBigInt(b64) {
   return new BigInteger(forge.util.bytesToHex(forge.util.decode64(b64)), 16);
 }
 
-module.exports = pki.rsa;
+module.exports = rsa;
