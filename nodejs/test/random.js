@@ -54,8 +54,8 @@ if(typeof define === 'function') {
     Tests(
       // Global provided by test harness
       ASSERT,
-      RANDOM(),
-      UTIL()
+      RANDOM,
+      UTIL
     );
   });
 } else if(typeof module === 'object' && module.exports) {
