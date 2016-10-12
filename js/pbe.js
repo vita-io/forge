@@ -107,8 +107,29 @@ var PBES2AlgorithmsValidator = {
         name: 'PBES2Algorithms.params.iterationCount',
         tagClass: asn1ct.Class.UNIVERSAL,
         type: asn1ct.Type.INTEGER,
-        onstructed: true,
+        constructed: false,
         capture: 'kdfIterationCount'
+      }, {
+        name: 'PBES2Algorithms.params.keyLength',
+        tagClass: asn1ct.Class.UNIVERSAL,
+        type: asn1ct.Type.INTEGER,
+        constructed: false,
+        optional: true,
+        capture: 'keyLength'
+      }, {
+        // prf
+        name: 'PBES2Algorithms.params.prf',
+        tagClass: asn1ct.Class.UNIVERSAL,
+        type: asn1ct.Type.SEQUENCE,
+        constructed: true,
+        optional: true,
+        value: [{
+          name: 'PBES2Algorithms.params.prf.algorithm',
+          tagClass: asn1ct.Class.UNIVERSAL,
+          type: asn1ct.Type.OID,
+          constructed: false,
+          capture: 'prfOid'
+        }]
       }]
     }]
   }, {
@@ -187,6 +208,8 @@ var pkcs12PbeParamsValidator = {
  *            ('aes128', 'aes192', 'aes256', '3des'), defaults to 'aes128'.
  *          count the iteration count to use.
  *          saltSize the salt size to use.
+ *          prfAlgorithm the PRF message digest algorithm to use
+ *            ('sha1', 'sha224', 'sha256', 'sha384', 'sha512')
  *
  * @return the ASN.1 EncryptedPrivateKeyInfo.
  */
@@ -196,6 +219,7 @@ pbe.encryptPrivateKeyInfo = function(obj, password, options) {
   options.saltSize = options.saltSize || 8;
   options.count = options.count || 2048;
   options.algorithm = options.algorithm || 'aes128';
+  options.prfAlgorithm = options.prfAlgorithm || 'sha1';
 
   // generate PBE params
   var salt = random.getBytesSync(options.saltSize);
@@ -205,7 +229,7 @@ pbe.encryptPrivateKeyInfo = function(obj, password, options) {
   var encryptionAlgorithm;
   var encryptedData;
   if(options.algorithm.indexOf('aes') === 0 || options.algorithm === 'des') {
-    // Do PBES2
+    // do PBES2
     var ivLen, encOid, cipherFn;
     switch(options.algorithm) {
     case 'aes128':
@@ -238,14 +262,21 @@ pbe.encryptPrivateKeyInfo = function(obj, password, options) {
       throw error;
     }
 
+    // get PRF message digest
+    var prfAlgorithm = 'hmacWith' + options.prfAlgorithm.toUpperCase();
+    var md = prfAlgorithmToMessageDigest(prfAlgorithm);
+
     // encrypt private key using pbe SHA-1 and AES/DES
-    var dk = pkcs5.pbkdf2(password, salt, count, dkLen);
+    var dk = pkcs5.pbkdf2(password, salt, count, dkLen, md);
     var iv = random.getBytesSync(ivLen);
     var cipher = cipherFn(dk);
     cipher.start(iv);
     cipher.update(asn1.toDer(obj));
     cipher.finish();
     encryptedData = cipher.output.getBytes();
+
+    // get PBKDF2-params
+    var params = createPbkdf2Params(salt, countBytes, dkLen, prfAlgorithm);
 
     encryptionAlgorithm = asn1.create(
       asn1ct.Class.UNIVERSAL, asn1ct.Type.SEQUENCE, true, [
@@ -257,14 +288,7 @@ pbe.encryptPrivateKeyInfo = function(obj, password, options) {
           asn1.create(asn1ct.Class.UNIVERSAL, asn1ct.Type.OID, false,
             asn1.oidToDer(oids['pkcs5PBKDF2']).getBytes()),
           // PBKDF2-params
-          asn1.create(asn1ct.Class.UNIVERSAL, asn1ct.Type.SEQUENCE, true, [
-            // salt
-            asn1.create(
-              asn1ct.Class.UNIVERSAL, asn1ct.Type.OCTETSTRING, false, salt),
-            // iteration count
-            asn1.create(asn1ct.Class.UNIVERSAL, asn1ct.Type.INTEGER, false,
-              countBytes.getBytes())
-          ])
+          params
         ]),
         // encryptionScheme
         asn1.create(asn1ct.Class.UNIVERSAL, asn1ct.Type.SEQUENCE, true, [
@@ -817,8 +841,11 @@ pbe.getCipherForPBES2 = function(oid, params, password) {
     break;
   }
 
-  // decrypt private key using pbe SHA-1 and AES/DES
-  var dk = pkcs5.pbkdf2(password, salt, count, dkLen);
+  // get PRF message digest
+  var md = prfOidToMessageDigest(capture.prfOid);
+
+  // decrypt private key using pbe with chosen PRF and AES/DES
+  var dk = pkcs5.pbkdf2(password, salt, count, dkLen, md);
   var iv = capture.encIv;
   var cipher = cipherFn(dk);
   cipher.start(iv);
@@ -877,8 +904,11 @@ pbe.getCipherForPKCS12PBE = function(oid, params, password) {
       throw error;
   }
 
-  var key = pbe.generatePkcs12Key(password, salt, 1, count, dkLen);
-  var iv = pbe.generatePkcs12Key(password, salt, 2, count, dIvLen);
+  // get PRF message digest
+  var md = prfOidToMessageDigest(capture.prfOid);
+  var key = pbe.generatePkcs12Key(password, salt, 1, count, dkLen, md);
+  md.start();
+  var iv = pbe.generatePkcs12Key(password, salt, 2, count, dIvLen, md);
 
   return cipherFn(key, iv);
 };
@@ -910,4 +940,72 @@ pbe.opensslDeriveBytes = function(password, salt, dkLen, md) {
 
 function hash(md, bytes) {
   return md.start().update(bytes).digest().getBytes();
+}
+
+function prfOidToMessageDigest(prfOid) {
+  // get PRF algorithm, default to SHA-1
+  var prfAlgorithm;
+  if(!prfOid) {
+    prfAlgorithm = 'hmacWithSHA1';
+  } else {
+    prfAlgorithm = pki.oids[asn1.derToOid(prfOid)];
+    if(!prfAlgorithm) {
+      var error = new Error('Unsupported PRF OID.');
+      error.oid = prfOid;
+      error.supported = [
+        'hmacWithSHA1', 'hmacWithSHA224', 'hmacWithSHA256', 'hmacWithSHA384',
+        'hmacWithSHA512'];
+      throw error;
+    }
+  }
+  return prfAlgorithmToMessageDigest(prfAlgorithm);
+}
+
+function prfAlgorithmToMessageDigest(prfAlgorithm) {
+  var factory = forge_md;
+  switch(prfAlgorithm) {
+  case 'hmacWithSHA224':
+    factory = forge_md.sha512;
+  case 'hmacWithSHA1':
+  case 'hmacWithSHA256':
+  case 'hmacWithSHA384':
+  case 'hmacWithSHA512':
+    prfAlgorithm = prfAlgorithm.substr(8).toLowerCase();
+    break;
+  default:
+    var error = new Error('Unsupported PRF algorithm.');
+    error.algorithm = prfAlgorithm;
+    error.supported = [
+      'hmacWithSHA1', 'hmacWithSHA224', 'hmacWithSHA256', 'hmacWithSHA384',
+      'hmacWithSHA512'];
+    throw error;
+  }
+  return factory[prfAlgorithm].create();
+}
+
+function createPbkdf2Params(salt, countBytes, dkLen, prfAlgorithm) {
+  var params = asn1.create(asn1ct.Class.UNIVERSAL, asn1ct.Type.SEQUENCE, true, [
+    // salt
+    asn1.create(
+      asn1ct.Class.UNIVERSAL, asn1ct.Type.OCTETSTRING, false, salt),
+    // iteration count
+    asn1.create(asn1ct.Class.UNIVERSAL, asn1ct.Type.INTEGER, false,
+      countBytes.getBytes())
+  ]);
+  // when PRF algorithm is not SHA-1 default, add key length and PRF algorithm
+  if(prfAlgorithm !== 'hmacWithSHA1') {
+    params.value.push(
+      // key length
+      asn1.create(asn1ct.Class.UNIVERSAL, asn1ct.Type.INTEGER, false,
+        util.hexToBytes(dkLen.toString(16))),
+      // AlgorithmIdentifier
+      asn1.create(asn1ct.Class.UNIVERSAL, asn1ct.Type.SEQUENCE, true, [
+        // algorithm
+        asn1.create(asn1ct.Class.UNIVERSAL, asn1ct.Type.OID, false,
+          asn1.oidToDer(pki.oids[prfAlgorithm]).getBytes()),
+        // parameters (null)
+        asn1.create(asn1ct.Class.UNIVERSAL, asn1ct.Type.NULL, false, '')
+      ]));
+  }
+  return params;
 }
